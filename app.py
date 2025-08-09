@@ -103,7 +103,7 @@ def handle_ai_reply(contact_id, phone_number, message_content):
             print(f"No ongoing conversation for {phone_number}. Skipping AI reply.")
             return
 
-        history = result[1]
+        status, history = result
         history.append({"role": "user", "content": message_content})
         
         system_prompt = "You are a professional medical assistant replying to a patient. Be helpful, concise, and empathetic. Do not give medical advice. If the patient asks for an appointment or to speak with a doctor, tell them you will connect them with a human."
@@ -187,17 +187,19 @@ def wassenger_webhook():
                 conn.close()
                 print(f"Follow-up for {phone_number} already exists.")
                 return jsonify({"status": "success", "message": "Follow-up already exists"}), 200
-
-            scheduled_time = datetime.now() + timedelta(minutes=1) # 1-minute delay for testing
             
-            cursor.execute("INSERT INTO follow_ups (contact_id, phone_number, status, scheduled_time, history) VALUES (%s, %s, %s, %s, %s)",
-                           (contact_id, phone_number, 'scheduled', scheduled_time, psycopg2.extras.Json([])))
+            # Create a new entry and call the send function immediately
+            cursor.execute("INSERT INTO follow_ups (contact_id, phone_number, status, history) VALUES (%s, %s, %s, %s)",
+                           (contact_id, phone_number, 'ongoing', psycopg2.extras.Json([])))
             conn.commit()
             cursor.close()
             conn.close()
             
-            print(f"Follow-up label detected for {phone_number}. Scheduling message in database.")
-            return jsonify({"status": "success", "message": "Follow-up scheduled"}), 200
+            # Call the send function directly to send the message without a delay
+            threading.Thread(target=send_initial_follow_up, args=[contact_id, phone_number]).start()
+            
+            print(f"Follow-up label detected for {phone_number}. Sending message now.")
+            return jsonify({"status": "success", "message": "Follow-up started"}), 200
 
     # Handle an incoming message from a patient
     elif event_type == "message:in:new":
@@ -214,16 +216,17 @@ def wassenger_webhook():
                 print(f"Follow-up for {phone_number} already exists.")
                 return jsonify({"status": "success", "message": "Follow-up already exists"}), 200
 
-            scheduled_time = datetime.now() + timedelta(minutes=1) # 1-minute delay for testing
-            
-            cursor.execute("INSERT INTO follow_ups (contact_id, phone_number, status, scheduled_time, history) VALUES (%s, %s, %s, %s, %s)",
-                           (contact_id, phone_number, 'scheduled', scheduled_time, psycopg2.extras.Json([])))
+            # Create a new entry and call the send function immediately
+            cursor.execute("INSERT INTO follow_ups (contact_id, phone_number, status, history) VALUES (%s, %s, %s, %s)",
+                           (contact_id, phone_number, 'ongoing', psycopg2.extras.Json([])))
             conn.commit()
             cursor.close()
             conn.close()
             
-            print(f"Message trigger detected for {phone_number}. Scheduling message in database.")
-            return jsonify({"status": "success", "message": "Follow-up scheduled"}), 200
+            threading.Thread(target=send_initial_follow_up, args=[contact_id, phone_number]).start()
+            
+            print(f"Message trigger detected for {phone_number}. Sending message now.")
+            return jsonify({"status": "success", "message": "Follow-up started"}), 200
 
         # Handle a regular patient reply if an ongoing conversation exists
         elif message_data.get("fromMe") is False:
