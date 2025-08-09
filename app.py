@@ -1,11 +1,11 @@
 import os
-import time
 import threading
 import requests
 from flask import Flask, request, jsonify
 from openai import OpenAI
 from dotenv import load_dotenv
 
+# Load environment variables from the .env file
 load_dotenv()
 
 app = Flask(__name__)
@@ -16,10 +16,12 @@ WASSENGER_API_KEY = os.getenv("WASSENGER_API_KEY")
 OPENAI_CLIENT = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # In-memory storage for conversation context
+# In production, replace this with a persistent database
 follow_up_contacts = {}
 
+# --- Helper Functions ---
 def send_message_to_wassenger(phone, message_content):
-    """Helper function to send a message via the Wassenger API."""
+    """Sends a message to a specific phone number via the Wassenger API."""
     headers = {"Authorization": f"Bearer {WASSENGER_API_KEY}", "Content-Type": "application/json"}
     payload = {"phone": phone, "message": message_content}
     try:
@@ -95,32 +97,38 @@ def wassenger_webhook():
         print("Webhook received with missing phone number or contact ID. Skipping.")
         return jsonify({"status": "error", "message": "Missing key data"}), 400
 
-    # Handle a contact being labeled
-    if event_type == "contact.update":
-        labels = data.get("labels", [])
-        if "Follow-up" in labels and contact_id not in follow_up_contacts:
-            print(f"Follow-up label detected for {phone_number}. Scheduling message.")
+    # Handle an incoming message from a human with a special keyword
+    if event_type == "message:in:new":
+        message_data = data
+        message_body = message_data.get("content", "").strip().upper()
+        
+        # Check for the trigger keyword, sent from a human (fromMe is True)
+        if message_data.get("fromMe") is True and message_body == "START FOLLOWUP":
+            print(f"Message trigger detected for {phone_number}. Scheduling message.")
             
-            follow_up_contacts[contact_id] = {
-                "status": "scheduled",
-                "history": [],
-                "phone_number": phone_number
-            }
+            if contact_id not in follow_up_contacts:
+                follow_up_contacts[contact_id] = {
+                    "status": "scheduled",
+                    "history": [],
+                    "phone_number": phone_number
+                }
+            
+            # Start the 24-hour timer
             threading.Timer(86400, send_initial_follow_up, args=[contact_id, phone_number]).start()
             
-    # Handle an incoming message from a patient
-    elif event_type == "message:in:new":  # Note: This is the event name from your screenshot
-        message_data = data
-        if message_data.get("fromMe") is False and contact_id in follow_up_contacts and follow_up_contacts[contact_id]["status"] == "ongoing":
+            return jsonify({"status": "success", "message": "Follow-up scheduled"}), 200
+
+        # Handle a regular patient reply if an ongoing conversation exists
+        elif message_data.get("fromMe") is False and contact_id in follow_up_contacts and follow_up_contacts[contact_id]["status"] == "ongoing":
             message_body = message_data.get("content")
             print(f"Patient {phone_number} replied: {message_body}")
-            
             threading.Thread(target=handle_ai_reply, args=[contact_id, phone_number, message_body]).start()
+
         else:
-            print(f"Ignoring message from {phone_number} as it's not part of an ongoing follow-up.")
+            print(f"Ignoring message from {phone_number} as it's not a trigger or part of an ongoing follow-up.")
 
     return jsonify({"status": "success"}), 200
 
-# This is for local development only.
+# This is for local development only. Gunicorn will handle this in production on Render.
 if __name__ == "__main__":
     app.run(port=5000, debug=True)
