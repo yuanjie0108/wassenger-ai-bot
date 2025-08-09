@@ -67,6 +67,7 @@ def send_initial_follow_up(contact_id, phone_number):
         message_text = completion.choices[0].message.content
 
         send_message_to_wassenger(phone_number, message_text)
+        print(f"AI initial follow-up message sent to {phone_number}.")
         
         # Update database
         conn = get_db_connection()
@@ -116,6 +117,7 @@ def handle_ai_reply(contact_id, phone_number, message_content):
         ai_reply = completion.choices[0].message.content
         
         send_message_to_wassenger(phone_number, ai_reply)
+        print(f"AI reply message sent to {phone_number}.")
         
         history.append({"role": "assistant", "content": ai_reply})
         
