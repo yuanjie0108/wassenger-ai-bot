@@ -83,7 +83,7 @@ def handle_ai_reply(contact_id, phone_number, message_content):
         print(f"Error generating AI reply for {phone_number}: {e}")
 
 # --- Webhook Endpoint ---
-@app.route("/wassenger-webhook", methods=["POST"])
+@app.route("/wassenger-webhook/", methods=["POST"])
 def wassenger_webhook():
     """This is the main entry point for all webhook events from Wassenger."""
     payload = request.json
