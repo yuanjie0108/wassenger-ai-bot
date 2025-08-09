@@ -89,8 +89,8 @@ def wassenger_webhook():
     payload = request.json
     event_type = payload.get("event")
     
-    # Extract data from the payload, handling different event structures
-    contact_id = payload.get("id") or payload.get("data", {}).get("contact", {}).get("id")
+    # --- MODIFIED: More robust data extraction ---
+    contact_id = payload.get("id") or payload.get("data", {}).get("wid") or payload.get("data", {}).get("contact", {}).get("id")
     phone_number = payload.get("data", {}).get("phone") or payload.get("data", {}).get("contact", {}).get("phone")
     
     if not phone_number or not contact_id:
