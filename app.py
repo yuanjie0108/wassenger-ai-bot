@@ -129,7 +129,7 @@ def wassenger_webhook():
                     "phone_number": phone_number
                 }
             
-            threading.Timer(86400, send_initial_follow_up, args=[contact_id, phone_number]).start()
+            threading.Timer(60, send_initial_follow_up, args=[contact_id, phone_number]).start()
             
             return jsonify({"status": "success", "message": "Follow-up scheduled"}), 200
 
