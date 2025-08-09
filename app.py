@@ -89,21 +89,37 @@ def wassenger_webhook():
     payload = request.json
     event_type = payload.get("event")
     
-    data = payload.get("data", {})
-    contact_id = data.get("contact", {}).get("id")
-    phone_number = data.get("contact", {}).get("phone")
+    # Extract data from the payload, handling different event structures
+    contact_id = payload.get("id") or payload.get("data", {}).get("contact", {}).get("id")
+    phone_number = payload.get("data", {}).get("phone") or payload.get("data", {}).get("contact", {}).get("phone")
     
     if not phone_number or not contact_id:
         print("Webhook received with missing phone number or contact ID. Skipping.")
         return jsonify({"status": "error", "message": "Missing key data"}), 400
 
-    # Handle an incoming message from a human with a special keyword
-    if event_type == "message:in:new":
-        message_data = data
-        message_body = message_data.get("content", "").strip().upper()
+    # Handle the contact update event
+    if event_type == "contact:update":
+        labels = payload.get("data", {}).get("chat", {}).get("labels", [])
         
-        # Check for the trigger keyword, sent from a human (fromMe is True)
-        if message_data.get("fromMe") is True and message_body == "START FOLLOWUP":
+        if "Follow-up" in labels and contact_id not in follow_up_contacts:
+            print(f"Follow-up label detected for {phone_number}. Scheduling message.")
+            
+            follow_up_contacts[contact_id] = {
+                "status": "scheduled",
+                "history": [],
+                "phone_number": phone_number
+            }
+            threading.Timer(86400, send_initial_follow_up, args=[contact_id, phone_number]).start()
+            
+            return jsonify({"status": "success", "message": "Follow-up scheduled"}), 200
+
+    # Handle an incoming message from a patient
+    elif event_type == "message:in:new":
+        message_data = payload.get("data", {})
+        message_body = message_data.get("content", "").strip()
+        
+        # Check for the trigger keyword
+        if message_data.get("fromMe") is True and message_body.upper() == "START FOLLOWUP":
             print(f"Message trigger detected for {phone_number}. Scheduling message.")
             
             if contact_id not in follow_up_contacts:
@@ -113,14 +129,12 @@ def wassenger_webhook():
                     "phone_number": phone_number
                 }
             
-            # Start the 24-hour timer
             threading.Timer(86400, send_initial_follow_up, args=[contact_id, phone_number]).start()
             
             return jsonify({"status": "success", "message": "Follow-up scheduled"}), 200
 
         # Handle a regular patient reply if an ongoing conversation exists
         elif message_data.get("fromMe") is False and contact_id in follow_up_contacts and follow_up_contacts[contact_id]["status"] == "ongoing":
-            message_body = message_data.get("content")
             print(f"Patient {phone_number} replied: {message_body}")
             threading.Thread(target=handle_ai_reply, args=[contact_id, phone_number, message_body]).start()
 
