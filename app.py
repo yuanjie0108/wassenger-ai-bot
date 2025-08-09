@@ -4,7 +4,6 @@ import requests
 import psycopg2
 import psycopg2.extras
 from flask import Flask, request, jsonify
-from openai import OpenAI
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
 import time
@@ -14,10 +13,13 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# --- Configuration & API Clients ---
+# --- Configuration ---
+# You can customize these messages directly in the code or use environment variables
+CUSTOM_FOLLOWUP_MESSAGE = "Hi, just a friendly follow-up regarding your recent inquiry. Is there anything we can help you with?"
+CUSTOM_REPLY_MESSAGE = "Thank you for your message. A human representative will be in touch shortly."
+
 WASSENGER_API_URL = os.getenv("WASSENGER_API_URL", "https://api.wassenger.com/v1")
 WASSENGER_API_KEY = os.getenv("WASSENGER_API_KEY")
-OPENAI_CLIENT = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -56,18 +58,10 @@ def send_message_to_wassenger(phone, message_content):
         print(f"An error occurred while sending message: {e}")
 
 def send_initial_follow_up(contact_id, phone_number):
-    """Generates the first AI message and sends it after a delay."""
+    """Sends a custom initial follow-up message."""
     try:
-        initial_prompt = "You are a helpful medical assistant. A patient needs a follow-up. Please write a polite message to ask how they are doing after their recent appointment and if they have any questions. Keep it under 100 words."
-        
-        completion = OPENAI_CLIENT.chat.completions.create(
-            model="gpt-4o", 
-            messages=[{"role": "system", "content": initial_prompt}]
-        )
-        message_text = completion.choices[0].message.content
-
-        send_message_to_wassenger(phone_number, message_text)
-        print(f"AI initial follow-up message sent to {phone_number}.")
+        send_message_to_wassenger(phone_number, CUSTOM_FOLLOWUP_MESSAGE)
+        print(f"Custom initial follow-up message sent to {phone_number}.")
         
         # Update database
         conn = get_db_connection()
@@ -77,7 +71,7 @@ def send_initial_follow_up(contact_id, phone_number):
         
         if result:
             history = result[0]
-            history.append({"role": "assistant", "content": message_text})
+            history.append({"role": "assistant", "content": CUSTOM_FOLLOWUP_MESSAGE})
             cursor.execute("UPDATE follow_ups SET status = %s, history = %s WHERE contact_id = %s", ('ongoing', psycopg2.extras.Json(history), contact_id))
         else:
             print(f"Warning: No follow-up found for {contact_id}. Initial message sent, but conversation status not updated.")
@@ -90,8 +84,8 @@ def send_initial_follow_up(contact_id, phone_number):
     except Exception as e:
         print(f"Error sending follow-up to {phone_number}: {e}")
 
-def handle_ai_reply(contact_id, phone_number, message_content):
-    """Generates and sends an AI reply based on conversation history."""
+def handle_custom_reply(contact_id, phone_number, message_content):
+    """Sends a custom reply to the patient."""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -100,26 +94,16 @@ def handle_ai_reply(contact_id, phone_number, message_content):
         
         if not result or result[0] != 'ongoing':
             conn.close()
-            print(f"No ongoing conversation for {phone_number}. Skipping AI reply.")
+            print(f"No ongoing conversation for {phone_number}. Skipping custom reply.")
             return
 
         status, history = result
         history.append({"role": "user", "content": message_content})
         
-        system_prompt = "You are a professional medical assistant replying to a patient. Be helpful, concise, and empathetic. Do not give medical advice. If the patient asks for an appointment or to speak with a doctor, tell them you will connect them with a human."
+        send_message_to_wassenger(phone_number, CUSTOM_REPLY_MESSAGE)
+        print(f"Custom reply message sent to {phone_number}.")
         
-        messages = [{"role": "system", "content": system_prompt}] + history
-        
-        completion = OPENAI_CLIENT.chat.completions.create(
-            model="gpt-4o",
-            messages=messages
-        )
-        ai_reply = completion.choices[0].message.content
-        
-        send_message_to_wassenger(phone_number, ai_reply)
-        print(f"AI reply message sent to {phone_number}.")
-        
-        history.append({"role": "assistant", "content": ai_reply})
+        history.append({"role": "assistant", "content": CUSTOM_REPLY_MESSAGE})
         
         # Update history in database
         cursor.execute("UPDATE follow_ups SET history = %s WHERE contact_id = %s", (psycopg2.extras.Json(history), contact_id))
@@ -127,9 +111,9 @@ def handle_ai_reply(contact_id, phone_number, message_content):
         cursor.close()
         conn.close()
         
-        print(f"AI replied to {phone_number} with: {ai_reply}")
+        print(f"Custom reply sent to {phone_number}.")
     except Exception as e:
-        print(f"Error generating AI reply for {phone_number}: {e}")
+        print(f"Error generating custom reply for {phone_number}: {e}")
 
 # --- Background Worker Thread ---
 def background_worker():
@@ -230,7 +214,7 @@ def wassenger_webhook():
 
         # Handle a regular patient reply if an ongoing conversation exists
         elif message_data.get("fromMe") is False:
-            threading.Thread(target=handle_ai_reply, args=[contact_id, phone_number, message_body]).start()
+            threading.Thread(target=handle_custom_reply, args=[contact_id, phone_number, message_body]).start()
 
         else:
             print(f"Ignoring message from {phone_number} as it's not a trigger or part of an ongoing follow-up.")
